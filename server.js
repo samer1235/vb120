@@ -6,26 +6,26 @@ const { Pool } = require('pg');
 const app = express();
 const port = process.env.PORT || 3000;
 
-// إعدادات قاعدة البيانات
+// إعداد قاعدة البيانات مع متغير البيئة DATABASE_URL
 const pool = new Pool({
-  connectionString: process.env.DATABASE_URL, // تأكد أنك تضيف هذا في Railway أو .env
-  ssl: { rejectUnauthorized: false } // إذا تحتاج SSL على Railway
+  connectionString: process.env.DATABASE_URL || 'postgresql://postgres:LvzPKmcHPUXhtDWaUGeUomlfMfEawcaR@caboose.proxy.rlwy.net:39107/railway',
+  ssl: { rejectUnauthorized: false }
 });
 
 app.use(cors());
 app.use(express.json());
 
-// Middleware للتحقق من بيانات الدخول (basic auth)
+// مصادقة Basic Auth
 const adminAuth = (req, res, next) => {
   const user = basicAuth(req);
-  if (!user || user.name !== 'dev2008' || user.pass !== 'admin') {
+  if (!user || user.name !== 'admin' || user.pass !== 'dev2008') {
     res.set('WWW-Authenticate', 'Basic realm="Admin Area"');
     return res.status(401).send('Unauthorized');
   }
   next();
 };
 
-// صفحة الأدمن - تعرض آخر 50 طلب
+// صفحة الأدمن تعرض آخر 50 طلب
 app.get('/admin', adminAuth, async (req, res) => {
   try {
     const result = await pool.query(
@@ -34,9 +34,9 @@ app.get('/admin', adminAuth, async (req, res) => {
 
     let html = `
       <h1>لوحة تحكم 4STORE - الأدمن</h1>
-      <table border="1" cellpadding="8" cellspacing="0">
+      <table border="1" cellpadding="8" cellspacing="0" style="border-collapse: collapse; width: 100%; direction: rtl;">
         <thead>
-          <tr>
+          <tr style="background-color: #6c4fcf; color: white;">
             <th>رقم الطلب</th>
             <th>الاسم</th>
             <th>رقم الجوال</th>
@@ -74,7 +74,7 @@ app.get('/admin', adminAuth, async (req, res) => {
   }
 });
 
-// API لإضافة طلب جديد (مثال)
+// API لإضافة طلب جديد
 app.post('/orders', async (req, res) => {
   const { name, phone, id_number, status } = req.body;
   try {
@@ -88,6 +88,11 @@ app.post('/orders', async (req, res) => {
     console.error(err);
     res.status(500).json({ success: false, error: 'فشل إضافة الطلب' });
   }
+});
+
+// نقطة البداية (اختياري)
+app.get('/', (req, res) => {
+  res.send('API 4STORE تعمل.');
 });
 
 app.listen(port, () => {
