@@ -1,95 +1,92 @@
 const express = require('express');
 const cors = require('cors');
-const { Pool } = require('pg');
 const basicAuth = require('basic-auth');
+const { Pool } = require('pg');
 
 const app = express();
 const port = process.env.PORT || 3000;
 
+// إعدادات قاعدة البيانات
 const pool = new Pool({
-  connectionString: 'postgresql://postgres:LvzPKmcHPUXhtDWaUGeUomlfMfEawcaR@caboose.proxy.rlwy.net:39107/railway',
+  connectionString: process.env.DATABASE_URL, // تأكد أنك تضيف هذا في Railway أو .env
+  ssl: { rejectUnauthorized: false } // إذا تحتاج SSL على Railway
 });
 
 app.use(cors());
 app.use(express.json());
 
-// إنشاء جدول الطلبات
-async function createTable() {
-  await pool.query(`
-    CREATE TABLE IF NOT EXISTS orders (
-      id SERIAL PRIMARY KEY,
-      offer_name VARCHAR(255) NOT NULL,
-      amount NUMERIC(10, 2) NOT NULL,
-      quantity INTEGER NOT NULL DEFAULT 1,
-      status VARCHAR(50) NOT NULL DEFAULT 'قيد المعالجة',
-      tracking_code VARCHAR(20) UNIQUE NOT NULL,
-      created_at TIMESTAMP NOT NULL DEFAULT NOW()
-    );
-  `);
-}
-createTable().catch(console.error);
-
-// Middleware بسيط للتحقق من Basic Auth
-function auth(req, res, next) {
+// Middleware للتحقق من بيانات الدخول (basic auth)
+const adminAuth = (req, res, next) => {
   const user = basicAuth(req);
   if (!user || user.name !== 'dev2008' || user.pass !== 'admin') {
-    res.set('WWW-Authenticate', 'Basic realm="لوحة تحكم 4STORE"');
+    res.set('WWW-Authenticate', 'Basic realm="Admin Area"');
     return res.status(401).send('Unauthorized');
   }
   next();
-}
+};
 
-// إضافة طلب جديد
-app.post('/orders', async (req, res) => {
-  const { offer_name, amount, quantity } = req.body;
-
-  if (!offer_name || !amount) {
-    return res.status(400).json({ error: 'العرض والسعر مطلوبان' });
-  }
-
-  // توليد كود تتبع عشوائي بسيط
-  const tracking_code = 'B' + Math.floor(100000 + Math.random() * 900000);
-
+// صفحة الأدمن - تعرض آخر 50 طلب
+app.get('/admin', adminAuth, async (req, res) => {
   try {
     const result = await pool.query(
-      `INSERT INTO orders (offer_name, amount, quantity, tracking_code) 
-       VALUES ($1, $2, $3, $4) RETURNING *`,
-      [offer_name, amount, quantity || 1, tracking_code]
+      `SELECT id, name, phone, id_number, created_at, status FROM orders ORDER BY created_at DESC LIMIT 50`
     );
-    res.json({ success: true, order: result.rows[0] });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'خطأ في إنشاء الطلب' });
-  }
-});
 
-// استعلام عن الطلب حسب كود التتبع
-app.get('/orders/:tracking_code', async (req, res) => {
-  const { tracking_code } = req.params;
+    let html = `
+      <h1>لوحة تحكم 4STORE - الأدمن</h1>
+      <table border="1" cellpadding="8" cellspacing="0">
+        <thead>
+          <tr>
+            <th>رقم الطلب</th>
+            <th>الاسم</th>
+            <th>رقم الجوال</th>
+            <th>رقم الهوية</th>
+            <th>تاريخ الطلب</th>
+            <th>الحالة</th>
+          </tr>
+        </thead>
+        <tbody>
+    `;
 
-  try {
-    const result = await pool.query(
-      `SELECT * FROM orders WHERE tracking_code = $1`,
-      [tracking_code]
-    );
-    if (result.rows.length === 0) {
-      return res.status(404).json({ error: 'لم يتم العثور على الطلب' });
+    for (const row of result.rows) {
+      html += `
+        <tr>
+          <td>${row.id}</td>
+          <td>${row.name || '-'}</td>
+          <td>${row.phone || '-'}</td>
+          <td>${row.id_number || '-'}</td>
+          <td>${new Date(row.created_at).toLocaleString('ar-EG')}</td>
+          <td>${row.status || '-'}</td>
+        </tr>
+      `;
     }
-    res.json({ order: result.rows[0] });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'خطأ في جلب الطلب' });
+
+    html += `
+        </tbody>
+      </table>
+      <p>تم عرض آخر 50 طلب</p>
+    `;
+
+    res.send(html);
+  } catch (err) {
+    console.error(err);
+    res.status(500).send('حدث خطأ في الخادم');
   }
 });
 
-// لوحة تحكم: عرض جميع الطلبات (محمي بكلمة مرور)
-app.get('/admin/orders', auth, async (req, res) => {
+// API لإضافة طلب جديد (مثال)
+app.post('/orders', async (req, res) => {
+  const { name, phone, id_number, status } = req.body;
   try {
-    const result = await pool.query(`SELECT * FROM orders ORDER BY created_at DESC`);
-    res.json({ orders: result.rows });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'خطأ في جلب الطلبات' });
+    const result = await pool.query(
+      `INSERT INTO orders (name, phone, id_number, status, created_at)
+       VALUES ($1, $2, $3, $4, NOW()) RETURNING id`,
+      [name, phone, id_number, status || 'قيد المراجعة']
+    );
+    res.json({ success: true, id: result.rows[0].id });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, error: 'فشل إضافة الطلب' });
   }
 });
 
